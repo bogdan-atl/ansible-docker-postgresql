@@ -1,0 +1,197 @@
+---
+- name: postgresql demo
+  hosts: database
+  become: true
+  vars:
+    postgresql_bin_path: "/usr/lib/postgresql/{{ postgresql_version }}/bin"
+    postgresql_data_dir: "/var/lib/postgresql/{{ postgresql_version }}/main"
+    ansible_ssh_pipelining: true
+  tasks:
+    - name: Install packages
+      ansible.builtin.apt:
+        name:
+          - postgresql-{{ postgresql_version  }}
+          - postgresql-contrib
+          - libpq-dev
+          - python3-psycopg2
+        state: present
+
+
+    - name: Check if PostgreSQL is initialized
+      ansible.builtin.stat:
+        path: "{{ postgresql_data_dir }}/pg_hba.conf"
+      register: postgres_data
+
+    - name: Empty config dir
+      ansible.builtin.file:
+        path: "/etc/postgresql/{{ postgresql_version }}/main/postgresql.conf"
+        state: absent
+
+    - name: Empty data dir
+      ansible.builtin.file:
+        path: "{{ postgresql_data_dir }}"
+        state: absent
+      when: not postgres_data.stat.exists
+
+
+    - name: Create file
+      ansible.builtin.file:
+        path: "/etc/postgresql/{{ postgresql_version }}/main/postgresql.conf"
+        state: touch
+
+    - name: Install new path
+      template:
+        src: /home/ansible/playbook/template/postgresql.conf.j2
+        dest: "/etc/postgresql/{{ postgresql_version }}/main/postgresql.conf"
+   
+
+    - name: Start and enable service
+      ansible.builtin.service:
+        name: postgresql
+        state: started
+        enabled: true
+
+
+
+
+- hosts: app
+  become: true
+  vars:
+    container_count: 1
+    default_container_name: docker
+    default_container_image: ubuntu
+    default_container_command: sleep 1d
+
+
+  tasks:
+    - name: Install pre-reqs for Docker and Ansible
+      apt: name={{ item }} state=latest update_cache=yes
+      loop: [ 'apt-transport-https','ca-certificates', 'curl', 'software-properties-common', 'python3-pip', 'virtualenv', 'python3-setuptools'] 
+      when: ansible_distribution == 'Ubuntu'
+
+    - name: Add Docker GPG apt Key
+      shell: 'curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg'
+      when: ansible_distribution == 'Ubuntu'
+
+    - name: Add Docker Repository
+      shell: 'echo "deb [arch=amd64 signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/debian bullseye stable" | tee /etc/apt/sources.list.d/docker.list'
+      when: ansible_distribution == 'Ubuntu'
+
+    - name: Update apt and install docker-ce
+      apt:
+        name: docker-ce
+        state: latest
+        update_cache: true
+      when: ansible_distribution == 'Ubuntu'
+
+    - name: Install Docker Module for Python
+      pip:
+        name: docker
+      when: ansible_distribution == 'Ubuntu'       
+
+    - name: Pull default Docker image
+      docker_image:
+        name: "{{ default_container_image }}"
+        source: pull
+      when: ansible_distribution == 'Ubuntu'
+
+    - name: Create default containers
+      docker_container:
+        name: "{{ default_container_name }}{{ item }}"
+        image: "{{ default_container_image }}"
+        command: "{{ default_container_command }}"
+        state: present
+      with_sequence: count={{ container_count }}
+      when: ansible_distribution == 'Ubuntu'
+
+#centos
+
+    - name: Install yum utils
+      ansible.builtin.yum:
+        name: yum-utils
+        state: latest
+      when: ansible_distribution == 'CentOS'
+
+    - name: Install the latest version of Apache
+      ansible.builtin.yum:
+        name: httpd
+        state: latest
+      when: ansible_distribution == 'CentOS'
+
+    - name: Install device-mapper-persistent-data
+      yum:
+        name: device-mapper-persistent-data
+        state: latest
+      when: ansible_distribution == 'CentOS'
+
+    - name: Install lvm2
+      yum:
+        name: lvm2
+        state: latest
+      when: ansible_distribution == 'CentOS'
+
+    - name: Install pip
+      yum:
+        name: python3-pip
+        state: latest
+      when: ansible_distribution == 'CentOS'
+
+    - name: Add Docker repo
+      get_url:
+        url: https://download.docker.com/linux/centos/docker-ce.repo
+        dest: /etc/yum.repos.d/docer-ce.repo
+      become: yes
+      when: ansible_distribution == 'CentOS'
+
+    - name: Enable Docker Edge repo
+      ini_file:
+        dest: /etc/yum.repos.d/docer-ce.repo
+        section: 'docker-ce-edge'
+        option: enabled
+        value: 0
+      become: yes
+      when: ansible_distribution == 'CentOS'
+
+    - name: Enable Docker Test repo
+      ini_file:
+        dest: /etc/yum.repos.d/docer-ce.repo
+        section: 'docker-ce-test'
+        option: enabled
+        value: 0
+      become: yes
+      when: ansible_distribution == 'CentOS'
+
+    - name: Install Docker
+      package:
+        name: docker-ce
+        state: latest
+      become: yes
+      when: ansible_distribution == 'CentOS'
+
+    - name: Install Docker Module for Python
+      pip:
+        name: docker
+      when: ansible_distribution == 'CentOS'
+
+    - name: Start Docker service
+      service:
+        name: docker
+        state: started
+        enabled: yes
+      become: yes
+      when: ansible_distribution == 'CentOS'
+
+    - name: Pull default Docker image
+      docker_image:
+        name: "{{ default_container_image }}"
+        source: pull
+      when: ansible_distribution == 'CentOS'
+
+    - name: Create default containers
+      docker_container:
+        name: "{{ default_container_name }}{{ item }}"
+        image: "{{ default_container_image }}"
+        command: "{{ default_container_command }}"
+        state: present
+      with_sequence: count={{ container_count }}
+      when: ansible_distribution == 'CentOS'
